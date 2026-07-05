@@ -1,0 +1,12 @@
+{
+    "bg_color": "#2b2b2b",
+    "default_data_path": "DATA",
+    "roi_counts": {
+        "L_Cortex": 2,
+        "L_Medulla": 3,
+        "R_Cortex": 2,
+        "R_Medulla": 3
+    },
+    "cortex_diameter": 10.0,
+    "medulla_diameter": 10.0
+}
