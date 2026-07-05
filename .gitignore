@@ -20,3 +20,10 @@ env/
 
 # Data (personal MRI scans)
 DATA/
+
+# Generated NIfTI masks outside DATA/
+*.nii
+*.nii.gz
+
+# Log files
+*.log
