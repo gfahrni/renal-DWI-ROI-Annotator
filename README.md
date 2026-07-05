@@ -5,6 +5,8 @@ ROI annotation tool for renal DWI series.
 ![Python](https://img.shields.io/badge/python-%3E%3D3.8-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+![Screenshot](screenshots/screenshot.jpg)
+
 ---
 
 ## Features
