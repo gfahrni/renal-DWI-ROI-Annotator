@@ -95,7 +95,7 @@ class ImageView(QGraphicsView):
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None, roi_counts=None,
-                 cortex_diameter=10.0, medulla_diameter=10.0):
+                 cortex_diameter=5.0, medulla_diameter=7.1):
         super().__init__(parent)
         self.setWindowTitle('Settings')
         self.setFixedSize(320, 380)
@@ -161,8 +161,8 @@ class SettingsDialog(QDialog):
     def _reset_defaults(self):
         for key, spin in self.roi_spins.items():
             spin.setValue(2 if 'Cortex' in key else 3)
-        self._cortex_diameter.setValue(10.0)
-        self._medulla_diameter.setValue(10.0)
+        self._cortex_diameter.setValue(5.0)
+        self._medulla_diameter.setValue(7.1)
 
         btn = self.sender()
         if btn:
@@ -307,9 +307,9 @@ class DicomViewer(QMainWindow):
         # ROI settings (persisted in settings.json)
         self._roi_counts = SETTINGS.get('roi_counts',
             {'L_Cortex': 2, 'L_Medulla': 3, 'R_Cortex': 2, 'R_Medulla': 3})
-        self._cortex_diameter = SETTINGS.get('cortex_diameter', 10.0)
+        self._cortex_diameter = SETTINGS.get('cortex_diameter', 5.0)
         self._cortex_area = self._diameter_to_area(self._cortex_diameter)
-        self._medulla_diameter = SETTINGS.get('medulla_diameter', 10.0)
+        self._medulla_diameter = SETTINGS.get('medulla_diameter', 7.1)
         self._medulla_area = self._diameter_to_area(self._medulla_diameter)
 
         # DWI b-value support
@@ -552,7 +552,7 @@ class DicomViewer(QMainWindow):
                     num_item.setBrush(QBrush(QColor(*rgb)))
                     num_item.setZValue(55)
                     font = num_item.font()
-                    font.setPointSize(5)
+                    font.setPointSize(4)
                     num_item.setFont(font)
                     num_item.setParentItem(ellipse)
                     br = num_item.boundingRect()
@@ -778,7 +778,7 @@ class DicomViewer(QMainWindow):
             num_item.setBrush(QBrush(QColor(*rgb)))
             num_item.setZValue(55)
             font = num_item.font()
-            font.setPointSize(5)
+            font.setPointSize(4)
             num_item.setFont(font)
             num_item.setParentItem(ellipse)
             br = num_item.boundingRect()
