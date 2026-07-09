@@ -22,7 +22,7 @@ def _list_dicom_files(dir_path):
     return sorted(files)
 
 
-def find_series(data_path):
+def find_series(data_path, _root=None):
     """
     Scan *data_path* and return a list of found DICOM series.
 
@@ -32,23 +32,28 @@ def find_series(data_path):
         1. Flat layout      – .dcm files are directly inside *data_path*.
         2. Intermediate     – *data_path* contains a single subdirectory;
                               descend into it and repeat (support for
-                              organiszational folder hierarchies).
+                              organisational folder hierarchies).
         3. Nested layout    – *data_path* contains multiple subdirectories,
                               each holding one series' worth of .dcm files.
 
     Each series is returned as a dict:
         {
-            'name':        str  – folder name (or leaf of data_path),
+            'name':        str  – first subfolder name under the original
+                                  *data_path* (i.e. the patient folder),
             'description': str  – DICOM SeriesDescription tag, if present,
             'files':       list – sorted absolute paths to .dcm files,
         }
 
     Args:
         data_path: Path to a directory containing DICOM data.
+        _root:     Internal – the original *data_path* passed on first call.
 
     Returns:
         A list of series dicts, or an empty list if nothing was found.
     """
+    if _root is None:
+        _root = data_path
+
     series = []
 
     # --- Try flat layout first ------------------------------------------------
@@ -59,11 +64,17 @@ def find_series(data_path):
         # skips the large pixel array, making this fast).
         ds = pydicom.dcmread(dcm_files[0], stop_before_pixels=True)
 
-        # Get the SeriesDescription tag, falling back to the folder name.
-        desc = ds.get('SeriesDescription', os.path.basename(data_path))
+        # Name = first path component of the DICOM file relative to _root.
+        # This gives the patient-folder name (e.g. "QB42XBZM") instead of
+        # the leaf series-folder name (e.g. "I1000000").
+        rel = os.path.relpath(dcm_files[0], _root)
+        parts = rel.split(os.sep)
+        name = parts[0] if len(parts) > 1 else os.path.basename(data_path)
+
+        desc = ds.get('SeriesDescription', name)
 
         series.append({
-            'name': os.path.basename(data_path),
+            'name': name,
             'description': desc,
             'files': dcm_files,
         })
@@ -81,13 +92,13 @@ def find_series(data_path):
 
     # --- Single subdirectory → intermediate folder, descend -------------------
     if len(subdirs) == 1:
-        return find_series(os.path.join(data_path, subdirs[0]))
+        return find_series(os.path.join(data_path, subdirs[0]), _root)
 
     # --- Multiple subdirectories → recurse into each one --------------------
     # Each may itself contain intermediate folders or series subdirectories.
     for entry in subdirs:
         subdir = os.path.join(data_path, entry)
-        series.extend(find_series(subdir))
+        series.extend(find_series(subdir, _root))
 
     return series
 
