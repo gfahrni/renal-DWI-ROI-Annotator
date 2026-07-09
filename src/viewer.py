@@ -62,7 +62,8 @@ SETTINGS = _load_settings()
 
 
 class ImageView(QGraphicsView):
-    """QGraphicsView subclass that handles mouse-wheel slice scrolling and ROI stamp placement."""
+    """QGraphicsView subclass that handles mouse-wheel slice scrolling,
+    ROI stamp placement, and middle-button window/level adjustment."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -82,10 +83,19 @@ class ImageView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.MouseButton.LeftButton and self._viewer is not None:
-            if self._viewer._on_mouse_press(event):
+        if self._viewer is not None:
+            if event.button() == Qt.MouseButton.MiddleButton:
+                self._viewer._on_mouse_middle_press(event)
                 return
+            if event.button() == Qt.MouseButton.LeftButton:
+                if self._viewer._on_mouse_press(event):
+                    return
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._viewer is not None:
+            self._viewer._on_mouse_release(event)
+        super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -315,8 +325,17 @@ class DicomViewer(QMainWindow):
         # DWI b-value support
         self._b_values = []
         self._current_b_value = None
-        self._b_value_map = {}    # b_value -> [slices]
-        self._images_map = {}     # b_value -> [precomputed uint8 arrays]
+        self._b_value_map = {}      # b_value -> [slices]
+        self._images_map = {}       # b_value -> [precomputed uint8 arrays]
+        self._raw_images_map = {}   # b_value -> [raw float64 arrays]
+        self._raw_images = []       # current b-value's raw float64 arrays
+
+        # Window / Level (windowing)
+        self._window_center = None
+        self._window_width = None
+        self._wl_dragging = False
+        self._wl_start_pos = None
+        self._wl_start_values = None   # (center, width) at drag start
 
         # ROI placement state
         self._roi_order = []
@@ -347,26 +366,50 @@ class DicomViewer(QMainWindow):
             self._b_value_map = bv_map
             self._b_values = sorted(bv_map.keys())
 
-            # Precompute images for every b-value group
+            # Store raw float arrays and precompute uint8 images for every b-value group
             self._images_map = {}
+            self._raw_images_map = {}
             for bv, slices in self._b_value_map.items():
-                self._images_map[bv] = self._precompute_images(slices)
+                raw = [ds.pixel_array.astype(np.float64) for ds in slices]
+                self._raw_images_map[bv] = raw
+                self._images_map[bv] = self._precompute_images(raw)
 
             # Default to the lowest b-value (best anatomical contrast)
             self._current_b_value = self._b_values[0]
             self._slices = self._b_value_map[self._current_b_value]
+            self._raw_images = self._raw_images_map[self._current_b_value]
             self._images = self._images_map[self._current_b_value]
         else:
             self._b_values = []
             self._current_b_value = None
             self._b_value_map = {}
+            self._raw_images_map = {}
             # Single group (no DWI or single b-value) — load normally
             all_slices = load_series(series['files'])
+            raw = [ds.pixel_array.astype(np.float64) for ds in all_slices]
+            self._raw_images = raw
             self._slices = all_slices
-            self._images = self._precompute_images(all_slices)
+            self._images = self._precompute_images(raw)
 
         self.num_slices = len(self._slices)
         self._slice_idx = 0
+
+        # Initial window/level from first slice's DICOM tags
+        self._window_center = None
+        self._window_width = None
+        if self._slices:
+            ds = self._slices[0]
+            wc = ds.get('WindowCenter', None)
+            ww = ds.get('WindowWidth', None)
+            if wc is not None and ww is not None:
+                self._window_center = float(wc[0]) if isinstance(wc, (list, tuple)) else float(wc)
+                self._window_width = float(ww[0]) if isinstance(ww, (list, tuple)) else float(ww)
+
+        # Restore saved W/L for this series
+        saved = self._load_windowing()
+        if saved is not None:
+            self._window_center = saved[0]
+            self._window_width = saved[1]
 
     @staticmethod
     def _diameter_to_area(d):
@@ -886,10 +929,45 @@ class DicomViewer(QMainWindow):
         found_item.setSelected(True)
 
     def _on_mouse_move(self, event):
+        if self._wl_dragging:
+            # Adjust window/level based on mouse delta
+            pos = event.pos()
+            dx = pos.x() - self._wl_start_pos.x()
+            dy = pos.y() - self._wl_start_pos.y()
+            base_c, base_w = self._wl_start_values
+            # Sensitivity: 1 pixel ≈ 0.5% of width for width, 1 pixel ≈ 0.5 for center
+            sens = 0.5
+            w = max(1.0, base_w + dx * sens)
+            c = base_c + dy * sens
+            self._apply_window(c, w)
+            return
+
         scene_pos = self.view.mapToScene(event.pos())
         if self.pixmap_item.pixmap() is None:
             return
         self._update_stamp(scene_pos)
+
+    def _on_mouse_middle_press(self, event):
+        if self._raw_images is None:
+            return
+        self._wl_dragging = True
+        self._wl_start_pos = event.pos()
+        c = self._window_center
+        w = self._window_width
+        if c is None:
+            c = float(self._raw_images[self._slice_idx].mean())
+        if w is None or w <= 0:
+            w = float(self._raw_images[self._slice_idx].ptp())
+            if w <= 0:
+                w = 1.0
+        self._wl_start_values = (c, w)
+
+    def _on_mouse_release(self, event):
+        if self._wl_dragging:
+            self._wl_dragging = False
+            self._wl_start_pos = None
+            self._wl_start_values = None
+            self._save_windowing()
 
     def _on_mouse_press(self, event):
         scene_pos = self.view.mapToScene(event.pos())
@@ -1005,38 +1083,86 @@ class DicomViewer(QMainWindow):
             )
             btn.setEnabled(False)
 
-    def _precompute_images(self, slices):
-        """Normalise a list of slices to uint8 using DICOM windowing.
+    def _precompute_images(self, raw_arrays):
+        """Normalise raw float64 arrays to uint8 using DICOM windowing.
 
         Args:
-            slices: List of pydicom Dataset objects.
+            raw_arrays: List of float64 numpy arrays (pixel data).
 
         Returns:
             List of uint8 numpy arrays.
         """
         images = []
-        for ds in slices:
-            arr = ds.pixel_array.astype(np.float64)
-
-            wc = ds.get('WindowCenter', None)
-            ww = ds.get('WindowWidth', None)
-
-            if wc is not None and ww is not None:
-                wc = float(wc[0]) if isinstance(wc, (list, tuple)) else float(wc)
-                ww = float(ww[0]) if isinstance(ww, (list, tuple)) else float(ww)
-                vmin = wc - ww / 2
-                vmax = wc + ww / 2
-            else:
-                vmin = arr.min()
-                vmax = arr.max()
-
+        for arr in raw_arrays:
+            vmin = arr.min()
+            vmax = arr.max()
             if vmax == vmin:
                 vmax = vmin + 1
-
             arr = np.clip(arr, vmin, vmax)
             arr = ((arr - vmin) / (vmax - vmin) * 255).astype(np.uint8)
             images.append(arr)
         return images
+
+    # ------------------------------------------------------------------
+    # Window / Level
+    # ------------------------------------------------------------------
+
+    def _apply_window(self, center, width):
+        """Re-normalise the current slice with *center* / *width* and refresh."""
+        self._window_center = center
+        self._window_width = width
+        if self._raw_images is None or self._slice_idx >= len(self._raw_images):
+            return
+        arr = self._raw_images[self._slice_idx].copy()
+        if center is not None and width is not None and width > 0:
+            vmin = center - width / 2
+            vmax = center + width / 2
+        else:
+            vmin = arr.min()
+            vmax = arr.max()
+        if vmax == vmin:
+            vmax = vmin + 1
+        arr = np.clip(arr, vmin, vmax)
+        arr = ((arr - vmin) / (vmax - vmin) * 255).astype(np.uint8)
+        pixmap = self._numpy_to_pixmap(arr)
+        self.pixmap_item.setPixmap(pixmap)
+
+    def _windowing_path(self):
+        if not self.series_list:
+            return None
+        d = self._mask_dir
+        if d is None:
+            return None
+        return os.path.join(d, 'windowing.json')
+
+    def _save_windowing(self):
+        path = self._windowing_path()
+        if path is None:
+            return
+        if self._window_center is not None and self._window_width is not None:
+            try:
+                with open(path, 'w') as f:
+                    json.dump({
+                        'window_center': self._window_center,
+                        'window_width': self._window_width,
+                    }, f)
+            except OSError:
+                pass
+
+    def _load_windowing(self):
+        path = self._windowing_path()
+        if path is None or not os.path.exists(path):
+            return None
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            wc = data.get('window_center')
+            ww = data.get('window_width')
+            if wc is not None and ww is not None:
+                return (float(wc), float(ww))
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+        return None
 
     def _init_ui(self):
         name = self.series_list[0]['name']
@@ -1261,9 +1387,7 @@ class DicomViewer(QMainWindow):
         return QPixmap.fromImage(qimg)
 
     def _show_slice(self):
-        arr = self._images[self._slice_idx]
-        pixmap = self._numpy_to_pixmap(arr)
-        self.pixmap_item.setPixmap(pixmap)
+        self._apply_window(self._window_center, self._window_width)
         self._fit_image()
 
         # Show ROIs for current slice, hide others
@@ -1352,6 +1476,7 @@ class DicomViewer(QMainWindow):
         self._current_b_value = bv
         self.bvalue_btn.setText(f'b={bv}')
         self._slices = self._b_value_map[bv]
+        self._raw_images = self._raw_images_map[bv]
         self._images = self._images_map[bv]
         self.num_slices = len(self._slices)
         self._slice_idx = 0
@@ -1414,6 +1539,7 @@ class DicomViewer(QMainWindow):
             self._switch_to_series(self.current_series_idx + 1)
 
     def _switch_to_series(self, idx):
+        self._save_windowing()
         self.current_series_idx = idx
         self._load_current_series()
         self._reset_all_rois()
