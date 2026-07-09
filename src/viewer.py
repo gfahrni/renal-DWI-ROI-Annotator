@@ -1638,8 +1638,16 @@ class DicomViewer(QMainWindow):
 
     def _switch_to_series(self, idx):
         self._save_windowing()
+        prev_center = self._window_center
+        prev_width = self._window_width
         self.current_series_idx = idx
         self._load_current_series()
+        # If the new case has no saved W/L file, carry over the W/L
+        # from the previous case instead of reverting to DICOM defaults.
+        if self._load_windowing() is None:
+            if prev_center is not None and prev_width is not None:
+                self._window_center = prev_center
+                self._window_width = prev_width
         self._reset_all_rois()
 
         # Update b-value button
