@@ -293,6 +293,70 @@ class SettingsDialog(QDialog):
         return self._medulla_area.value()
 
 
+class WindowDialog(QDialog):
+    """Popup to view/edit window center/width and reset to DICOM defaults."""
+
+    def __init__(self, parent=None, center=None, width=None,
+                 default_center=None, default_width=None):
+        super().__init__(parent)
+        self.setWindowTitle('Window / Level')
+        self.setFixedSize(260, 180)
+
+        self._default_center = default_center
+        self._default_width = default_width
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        form = QFormLayout()
+        self.center_spin = QDoubleSpinBox()
+        self.center_spin.setRange(-99999, 99999)
+        self.center_spin.setDecimals(1)
+        self.center_spin.setValue(center if center is not None else 0)
+        form.addRow('Center (WC)', self.center_spin)
+
+        self.width_spin = QDoubleSpinBox()
+        self.width_spin.setRange(1, 99999)
+        self.width_spin.setDecimals(1)
+        self.width_spin.setValue(width if width is not None else 1)
+        form.addRow('Width (WW)', self.width_spin)
+
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+
+        reset_btn = QPushButton('Reset to Default')
+        reset_btn.setStyleSheet(
+            'QPushButton { background-color: #6b1a1a; color: white; '
+            'border: none; padding: 4px 10px; font-size: 11px; }'
+            'QPushButton:hover { background-color: #8b2a2a; }'
+        )
+        reset_btn.clicked.connect(self._reset_defaults)
+        btn_row.addWidget(reset_btn)
+
+        btn_row.addStretch()
+
+        ok_btn = QPushButton('OK')
+        ok_btn.setStyleSheet(
+            'QPushButton { background-color: #4a4a4a; color: white; '
+            'border: none; padding: 4px 20px; font-size: 12px; }'
+            'QPushButton:hover { background-color: #5a5a5a; }'
+        )
+        ok_btn.clicked.connect(self.accept)
+        btn_row.addWidget(ok_btn)
+
+        layout.addLayout(btn_row)
+
+    def _reset_defaults(self):
+        if self._default_center is not None:
+            self.center_spin.setValue(self._default_center)
+        if self._default_width is not None:
+            self.width_spin.setValue(self._default_width)
+
+    def get_values(self):
+        return (self.center_spin.value(), self.width_spin.value())
+
+
 class DicomViewer(QMainWindow):
     """PyQt6-based annotator for browsing renal DWI series and drawing ROIs."""
 
@@ -333,6 +397,8 @@ class DicomViewer(QMainWindow):
         # Window / Level (windowing)
         self._window_center = None
         self._window_width = None
+        self._default_window_center = None
+        self._default_window_width = None
         self._wl_dragging = False
         self._wl_start_pos = None
         self._wl_start_values = None   # (center, width) at drag start
@@ -397,13 +463,19 @@ class DicomViewer(QMainWindow):
         # Initial window/level from first slice's DICOM tags
         self._window_center = None
         self._window_width = None
+        self._default_window_center = None
+        self._default_window_width = None
         if self._slices:
             ds = self._slices[0]
             wc = ds.get('WindowCenter', None)
             ww = ds.get('WindowWidth', None)
             if wc is not None and ww is not None:
-                self._window_center = float(wc[0]) if isinstance(wc, (list, tuple)) else float(wc)
-                self._window_width = float(ww[0]) if isinstance(ww, (list, tuple)) else float(ww)
+                c = float(wc[0]) if isinstance(wc, (list, tuple)) else float(wc)
+                w = float(ww[0]) if isinstance(ww, (list, tuple)) else float(ww)
+                self._window_center = c
+                self._window_width = w
+                self._default_window_center = c
+                self._default_window_width = w
 
         # Restore saved W/L for this series
         saved = self._load_windowing()
@@ -1111,6 +1183,7 @@ class DicomViewer(QMainWindow):
         """Re-normalise the current slice with *center* / *width* and refresh."""
         self._window_center = center
         self._window_width = width
+        self._update_window_btn()
         if self._raw_images is None or self._slice_idx >= len(self._raw_images):
             return
         arr = self._raw_images[self._slice_idx].copy()
@@ -1163,6 +1236,25 @@ class DicomViewer(QMainWindow):
         except (OSError, json.JSONDecodeError, ValueError):
             pass
         return None
+
+    def _update_window_btn(self):
+        if self._window_center is not None and self._window_width is not None:
+            self.window_btn.setText(
+                f'W/L: {self._window_center:.1f} / {self._window_width:.1f}')
+        else:
+            self.window_btn.setText('W/L: auto')
+
+    def _open_window_dialog(self):
+        c = self._window_center
+        w = self._window_width
+        dc = self._default_window_center
+        dw = self._default_window_width
+        dialog = WindowDialog(self, center=c, width=w,
+                              default_center=dc, default_width=dw)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_c, new_w = dialog.get_values()
+            self._apply_window(new_c, new_w)
+            self._save_windowing()
 
     def _init_ui(self):
         name = self.series_list[0]['name']
@@ -1260,6 +1352,12 @@ class DicomViewer(QMainWindow):
         self.bvalue_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._rebuild_bvalue_menu()
         top_row.addWidget(self.bvalue_btn)
+
+        self.window_btn = QPushButton()
+        self.window_btn.setStyleSheet(btn_style)
+        self.window_btn.clicked.connect(self._open_window_dialog)
+        self._update_window_btn()
+        top_row.addWidget(self.window_btn)
 
         self.reset_rois_btn = QPushButton('Reset')
         self.reset_rois_btn.setStyleSheet(btn_style)
