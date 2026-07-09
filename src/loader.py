@@ -83,25 +83,11 @@ def find_series(data_path):
     if len(subdirs) == 1:
         return find_series(os.path.join(data_path, subdirs[0]))
 
-    # --- Multiple subdirectories → treat each as a series folder --------------
+    # --- Multiple subdirectories → recurse into each one --------------------
+    # Each may itself contain intermediate folders or series subdirectories.
     for entry in subdirs:
         subdir = os.path.join(data_path, entry)
-
-        # Gather .dcm files inside this subdirectory.
-        dcm_files = _list_dicom_files(subdir)
-        if not dcm_files:
-            # This subdir has no DICOM files → skip it.
-            continue
-
-        # Read metadata from the first file to get a human-readable name.
-        ds = pydicom.dcmread(dcm_files[0], stop_before_pixels=True)
-        desc = ds.get('SeriesDescription', entry)
-
-        series.append({
-            'name': entry,
-            'description': desc,
-            'files': dcm_files,
-        })
+        series.extend(find_series(subdir))
 
     return series
 
