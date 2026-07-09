@@ -27,11 +27,14 @@ def find_series(data_path):
     Scan *data_path* and return a list of found DICOM series.
 
     A "series" is a group of .dcm files that belong together (e.g. one MRI
-    scan sequence). This function handles two layouts:
+    scan sequence). This function handles three layouts:
 
-        1. Flat layout  – .dcm files are directly inside *data_path*.
-        2. Nested layout – *data_path* contains subdirectories, each holding
-           one series' worth of .dcm files.
+        1. Flat layout      – .dcm files are directly inside *data_path*.
+        2. Intermediate     – *data_path* contains a single subdirectory;
+                              descend into it and repeat (support for
+                              organiszational folder hierarchies).
+        3. Nested layout    – *data_path* contains multiple subdirectories,
+                              each holding one series' worth of .dcm files.
 
     Each series is returned as a dict:
         {
@@ -67,14 +70,22 @@ def find_series(data_path):
         # Flat layout found files → we're done, no need to check subfolders.
         return series
 
-    # --- Try nested layout ----------------------------------------------------
-    # No .dcm files at the top level → look inside each subdirectory.
-    for entry in sorted(os.listdir(data_path)):
-        subdir = os.path.join(data_path, entry)
+    # --- Gather subdirectories ------------------------------------------------
+    subdirs = sorted([
+        entry for entry in os.listdir(data_path)
+        if os.path.isdir(os.path.join(data_path, entry))
+    ])
 
-        # Skip files, only descend into directories.
-        if not os.path.isdir(subdir):
-            continue
+    if not subdirs:
+        return series
+
+    # --- Single subdirectory → intermediate folder, descend -------------------
+    if len(subdirs) == 1:
+        return find_series(os.path.join(data_path, subdirs[0]))
+
+    # --- Multiple subdirectories → treat each as a series folder --------------
+    for entry in subdirs:
+        subdir = os.path.join(data_path, entry)
 
         # Gather .dcm files inside this subdirectory.
         dcm_files = _list_dicom_files(subdir)
