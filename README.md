@@ -15,8 +15,9 @@ ROI annotation tool for renal DWI series.
 - **Multiple series** — auto-detect all series in a folder, switch with **Previous Case (Q)** / **Next Case (E)** buttons
 - **Case / Slice dropdowns** — jump directly to any case or slice via `QToolButton` menus
 - **DWI b-value selector** — `QToolButton` menu to choose which b-value to display
-- **DICOM windowing** — reads `WindowCenter` / `WindowWidth` tags for optimal grayscale display; falls back to min/max pixel values
-- **Flat or nested folders** — works whether `.dcm` files are directly in the data directory or organised in subdirectories
+- **Interactive window/level** — middle‑mouse drag to adjust contrast (width) and brightness (center); **W/L button** shows current values and opens a popup for manual entry and reset to DICOM defaults
+- **Per‑case W/L persistence** — window/level settings are saved per series (`roi_masks/windowing.json`) and automatically restored on revisit; when switching to a new case, the W/L carries over from the previous case
+- **Flexible folder structure** — supports flat layouts, nested patient/series folders, and organisational intermediate directories; traversed automatically as long as each intermediate level contains a single subdirectory
 - **Settings dialog** — configurable ROI count per zone (L/R Cortex/Medulla, 0–10) and default ROI size (diameter/area, Cortex vs Medulla), persisted in `settings.json`
 - **ROI placement** — circular stamp following the mouse; click to deposit an ellipse on the image; buttons reflect zone colour when placed (filled = brighter, unfilled = darker)
 - **ROI selection & deletion** — click an existing ROI or its button to select it (purple outline, purple name label below, button turns purple); press <kbd>Delete</kbd> or <kbd>Backspace</kbd> to remove it
@@ -39,10 +40,11 @@ renal-DWI-ROI-Annotator/
 ├── DATA/               # DICOM datasets
 │   ├── <patient>/
 │   │   └── roi_masks/  # Generated: 3D NIfTI masks per ROI label
+│   │       └── windowing.json  # Per‑case window/level settings (auto‑generated)
 │   └── ...
 └── src/
     ├── __init__.py     # Makes src/ a Python package
-    ├── loader.py       # DICOM discovery, I/O, and DWI b-value grouping
+    ├── loader.py       # DICOM discovery, I/O, and DWI b‑value grouping
     └── viewer.py       # DicomViewer class — UI layout, ROI placement & interaction
 ```
 
@@ -85,10 +87,11 @@ python run.py /path/to/dicom     # opens a custom folder
 ### Controls
 
 | Input | Action |
-|---|---|
+|---|---|---|
 | Mouse wheel up/down | Previous / next slice |
 | Vertical slider | Drag to jump to a slice |
 | Mouse click (on image) | Place current ROI (stamp cursor) |
+| **Middle‑mouse drag** (on image) | Adjust window/level (horizontal = width, vertical = center) |
 | Click on existing ROI | Select it |
 | <kbd>Delete</kbd> / <kbd>Backspace</kbd> | Delete selected ROI |
 | <kbd>Q</kbd> | Previous case |
@@ -96,6 +99,7 @@ python run.py /path/to/dicom     # opens a custom folder
 | <kbd>B</kbd> | Open b-value dropdown |
 | **Case / Slice buttons** | Dropdown menu to jump to any case or slice |
 | **b-value button** | Dropdown menu to select b-value |
+| **W/L button** | Shows current window/level; click to open popup for manual entry and reset |
 | **Previous Case / Next Case** buttons | Navigate series |
 | **Settings** | Open ROI configuration dialog |
 
