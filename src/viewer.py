@@ -1615,10 +1615,10 @@ class DicomViewer(QMainWindow):
         self._raw_images = self._raw_images_map[bv]
         self._images = self._images_map[bv]
         self.num_slices = len(self._slices)
-        self._slice_idx = 0
+        self._slice_idx = min(self._slice_idx, self.num_slices - 1)
         self.slider.blockSignals(True)
         self.slider.setRange(0, self.num_slices - 1)
-        self.slider.setValue(0)
+        self.slider.setValue(self._slice_idx)
         self.slider.blockSignals(False)
         self._rebuild_slice_menu()
         self._show_slice()
