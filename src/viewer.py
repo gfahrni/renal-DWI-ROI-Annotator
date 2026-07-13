@@ -400,7 +400,6 @@ class DicomViewer(QMainWindow):
         # TRACEW (trace-weighted) detection
         self._series_is_tracew = False
         self._tracew_b_values = None
-        self._global_slices = []    # full sorted slice list for ROI index mapping
 
         # Window / Level (windowing)
         self._window_center = None
@@ -436,16 +435,6 @@ class DicomViewer(QMainWindow):
 
         # Try DWI grouping first
         bv_map = load_dwi_series(series['files'])
-
-        # Build the full sorted global slice list (used for ROI slice-index
-        # mapping across b-value groups).
-        if bv_map:
-            all_bv = []
-            for bv in sorted(bv_map.keys()):
-                all_bv.extend(bv_map[bv])
-            self._global_slices = all_bv
-        else:
-            self._global_slices = []
 
         # TRACEW fallback: if only one b-value group, try splitting by
         # b-values parsed from the protocol name (e.g. b0_b200_b1500).
@@ -605,29 +594,15 @@ class DicomViewer(QMainWindow):
         ellipse = self._roi_items[slice_idx][label]
         rect = ellipse.rect()
         h, w = self._slices[0].pixel_array.shape[:2]
-        # Use global slice count for mask depth so ROIs remain compatible
-        # across b-value groups.
-        n_global = len(self._global_slices) if self._global_slices else len(self._slices)
-        if n_global != len(self._slices) and self._global_slices:
-            # Map local slice index → global InstanceNumber → global z-index
-            inst = int(self._slices[slice_idx].get('InstanceNumber', 0))
-            global_idx = None
-            for i, ds in enumerate(self._global_slices):
-                if int(ds.get('InstanceNumber', 0)) == inst:
-                    global_idx = i
-                    break
-            if global_idx is None:
-                global_idx = slice_idx
-        else:
-            global_idx = slice_idx
-        mask = np.zeros((w, h, n_global), dtype=np.uint8)
+        d = len(self._slices)
+        mask = np.zeros((w, h, d), dtype=np.uint8)
         cx = rect.x() + rect.width() / 2
         cy = rect.y() + rect.height() / 2
         rx = rect.width() / 2
         ry = rect.height() / 2
         yy, xx = np.mgrid[:h, :w]
         inside = ((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2 <= 1
-        mask[xx[inside], yy[inside], global_idx] = 1
+        mask[xx[inside], yy[inside], slice_idx] = 1
         affine = self._compute_affine()
         nii = nib.Nifti1Image(mask, affine)
         fpath = self._mask_filename(label, rx)
@@ -653,23 +628,6 @@ class DicomViewer(QMainWindow):
         mask_dir = self._mask_dir
         if not mask_dir or not os.path.isdir(mask_dir):
             return
-
-        # Build global → local slice index map when we have b-value grouping
-        # (mask z-indices refer to the full series, but current view is a subset).
-        n_local = len(self._slices)
-        if self._global_slices and len(self._global_slices) != n_local:
-            local_inst = {
-                int(ds.get('InstanceNumber', 0)): i
-                for i, ds in enumerate(self._slices)
-            }
-            global_inst = [
-                int(ds.get('InstanceNumber', 0))
-                for ds in self._global_slices
-            ]
-        else:
-            local_inst = {}
-            global_inst = []
-
         for fname in os.listdir(mask_dir):
             if not fname.endswith('.nii'):
                 continue
@@ -696,18 +654,8 @@ class DicomViewer(QMainWindow):
                 continue
             w, h, d = data.shape
             placed = False
-            for z in range(d):
-                # Map mask z-index to local slice index when the mask
-                # was saved for a different number of slices (e.g. before
-                # TRACEW b-value splitting).
-                if local_inst and z < len(global_inst):
-                    inst = global_inst[z]
-                    z_local = local_inst.get(inst)
-                    if z_local is None:
-                        continue  # this slice belongs to a different b-value group
-                else:
-                    z_local = z
-                mask_slice = data[:, :, z]
+            for slice_idx in range(d):
+                mask_slice = data[:, :, slice_idx]
                 if not np.any(mask_slice):
                     continue
                 xs, ys = np.where(mask_slice)
@@ -733,9 +681,9 @@ class DicomViewer(QMainWindow):
                     QGraphicsEllipseItem.GraphicsItemFlag.ItemIsSelectable, True)
                 ellipse.setZValue(50)
                 ellipse.setData(0, label)
-                ellipse.setData(1, z_local)
+                ellipse.setData(1, slice_idx)
                 ellipse.setData(3, fpath)
-                if label in self._roi_items.get(z_local, {}):
+                if label in self._roi_items.get(slice_idx, {}):
                     print(f'[mask] Skipping duplicate: {label}')
                     placed = True
                     break
@@ -754,7 +702,7 @@ class DicomViewer(QMainWindow):
                     num_item.setPos(cx - br.width() / 2,
                                     cy - br.height() / 2)
                     ellipse.setData(4, num_item)
-                self._roi_items.setdefault(z_local, {})[label] = ellipse
+                self._roi_items.setdefault(slice_idx, {})[label] = ellipse
                 if label in self._roi_buttons:
                     s = self._roi_color_scheme(label)
                     self._roi_buttons[label].setStyleSheet(
@@ -1673,10 +1621,6 @@ class DicomViewer(QMainWindow):
         self.slider.setValue(0)
         self.slider.blockSignals(False)
         self._rebuild_slice_menu()
-        # Reload ROIs for the new b-value group (slice indices differ)
-        self._reset_all_rois()
-        self._load_existing_masks()
-        self._update_case_btn_color()
         self._show_slice()
 
     def _on_case_action(self, action):
