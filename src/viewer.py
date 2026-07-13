@@ -545,8 +545,6 @@ class DicomViewer(QMainWindow):
 
     def _mask_filename(self, label, radius_px=None):
         parts = [label]
-        if self._current_b_value is not None:
-            parts.append(f'b{self._current_b_value}')
         if radius_px is not None:
             parts.append(f'r{radius_px:.2f}')
         return os.path.join(self._mask_dir, '_'.join(parts) + '.nii')
@@ -639,17 +637,10 @@ class DicomViewer(QMainWindow):
             if m_r:
                 file_r = float(m_r.group(1))
                 stem = stem[:m_r.start()]
-            file_b = None
-            m_b = re.search(r'_b(\d+(\.\d+)?)$', stem)
-            if m_b:
-                file_b = float(m_b.group(1))
-                stem = stem[:m_b.start()]
             stem = re.sub(r'_b\d+$', '', stem)
             label = stem
             if label not in self._roi_order:
                 print(f'[mask] Skipping unknown label: {label}')
-                continue
-            if file_b is not None and self._current_b_value is not None and abs(file_b - self._current_b_value) > 1e-6:
                 continue
             fpath = os.path.join(mask_dir, fname)
             try:
