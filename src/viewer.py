@@ -27,7 +27,10 @@ import re
 
 import nibabel as nib
 
-from .loader import find_series, load_series, load_dwi_series
+from .loader import (
+    find_series, load_series, load_dwi_series,
+    is_tracew_series, get_tracew_b_values, format_tracew_label,
+)
 
 
 SETTINGS_PATH = os.path.join(
@@ -394,6 +397,10 @@ class DicomViewer(QMainWindow):
         self._raw_images_map = {}   # b_value -> [raw float64 arrays]
         self._raw_images = []       # current b-value's raw float64 arrays
 
+        # TRACEW (trace-weighted) detection
+        self._series_is_tracew = False
+        self._tracew_b_values = None
+
         # Window / Level (windowing)
         self._window_center = None
         self._window_width = None
@@ -428,6 +435,23 @@ class DicomViewer(QMainWindow):
 
         # Try DWI grouping first
         bv_map = load_dwi_series(series['files'])
+
+        # TRACEW fallback: if only one b-value group, try splitting by
+        # b-values parsed from the protocol name (e.g. b0_b200_b1500).
+        # Many scanners store separate trace-weighted volumes per b-value
+        # in the same series, but without reliable per-slice b-value tags.
+        if len(bv_map) <= 1:
+            all_slices = next(iter(bv_map.values())) if bv_map else load_series(series['files'])
+            if all_slices and is_tracew_series(all_slices):
+                tracew_vals = get_tracew_b_values(all_slices)
+                if tracew_vals and len(tracew_vals) > 1:
+                    n = len(all_slices) // len(tracew_vals)
+                    bv_map = {}
+                    for i, bv in enumerate(tracew_vals):
+                        start = i * n
+                        end = start + n if i < len(tracew_vals) - 1 else len(all_slices)
+                        bv_map[bv] = all_slices[start:end]
+
         if len(bv_map) > 1:
             self._b_value_map = bv_map
             self._b_values = sorted(bv_map.keys())
@@ -435,8 +459,8 @@ class DicomViewer(QMainWindow):
             # Store raw float arrays and precompute uint8 images for every b-value group
             self._images_map = {}
             self._raw_images_map = {}
-            for bv, slices in self._b_value_map.items():
-                raw = [ds.pixel_array.astype(np.float64) for ds in slices]
+            for bv, bv_slices in self._b_value_map.items():
+                raw = [ds.pixel_array.astype(np.float64) for ds in bv_slices]
                 self._raw_images_map[bv] = raw
                 self._images_map[bv] = self._precompute_images(raw)
 
@@ -450,12 +474,16 @@ class DicomViewer(QMainWindow):
             self._current_b_value = None
             self._b_value_map = {}
             self._raw_images_map = {}
-            # Single group (no DWI or single b-value) — load normally
-            all_slices = load_series(series['files'])
+            # Reuse already-loaded slices from bv_map to avoid re-reading
+            all_slices = next(iter(bv_map.values())) if bv_map else load_series(series['files'])
             raw = [ds.pixel_array.astype(np.float64) for ds in all_slices]
             self._raw_images = raw
             self._slices = all_slices
             self._images = self._precompute_images(raw)
+
+        # Detect TRACEW (trace-weighted) series
+        self._series_is_tracew = is_tracew_series(self._slices)
+        self._tracew_b_values = get_tracew_b_values(self._slices) if self._series_is_tracew else None
 
         self.num_slices = len(self._slices)
         self._slice_idx = 0
@@ -1346,8 +1374,14 @@ class DicomViewer(QMainWindow):
         top_row.addStretch()
 
         self.bvalue_btn = QToolButton()
-        self.bvalue_btn.setText(
-            f'b={self._b_values[0]}' if self._b_values else 'b-value N/A')
+        if self._b_values:
+            self.bvalue_btn.setText(
+                f'b={self._b_values[0]}' if self._b_values else 'b-value N/A')
+        elif self._series_is_tracew:
+            self.bvalue_btn.setText(
+                format_tracew_label(self._tracew_b_values))
+        else:
+            self.bvalue_btn.setText('b-value N/A')
         self.bvalue_btn.setStyleSheet(menu_btn_style)
         self.bvalue_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._rebuild_bvalue_menu()
@@ -1565,6 +1599,10 @@ class DicomViewer(QMainWindow):
                 action = menu.addAction(f'b={bv}')
                 action.setData(bv)
             menu.triggered.connect(self._on_b_value_action)
+        elif self._series_is_tracew:
+            action = menu.addAction(
+                format_tracew_label(self._tracew_b_values))
+            action.setEnabled(False)
         self.bvalue_btn.setMenu(menu)
 
     def _on_b_value_action(self, action):
@@ -1657,6 +1695,9 @@ class DicomViewer(QMainWindow):
             self.bvalue_btn.setText(f'b={self._current_b_value}')
             self._slices = self._b_value_map[self._current_b_value]
             self._images = self._images_map[self._current_b_value]
+        elif self._series_is_tracew:
+            self.bvalue_btn.setText(
+                format_tracew_label(self._tracew_b_values))
         else:
             self.bvalue_btn.setText('b-value N/A')
 

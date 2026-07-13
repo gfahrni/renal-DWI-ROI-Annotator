@@ -14,7 +14,7 @@ ROI annotation tool for renal DWI series.
 - **Slice navigation** — mouse wheel, vertical slider, or keyboard
 - **Multiple series** — auto-detect all series in a folder, switch with **Previous Case (Q)** / **Next Case (E)** buttons
 - **Case / Slice dropdowns** — jump directly to any case or slice via `QToolButton` menus
-- **DWI b-value selector** — `QToolButton` menu to choose which b-value to display
+- **DWI b-value selector** — `QToolButton` menu to choose which b-value to display; **TRACEW** (trace-weighted) series are automatically detected and split into individual b-value groups by parsing the protocol name (e.g. `b0_b200_b1500`)
 - **Interactive window/level** — middle‑mouse drag to adjust contrast (width) and brightness (center); **W/L button** shows current values and opens a popup for manual entry and reset to DICOM defaults
 - **Per‑case W/L persistence** — window/level settings are saved per series (`roi_masks/windowing.json`) and automatically restored on revisit; when switching to a new case, the W/L carries over from the previous case
 - **Flexible folder structure** — supports flat layouts, nested patient/series folders, and organisational intermediate directories; traversed automatically as long as each intermediate level contains a single subdirectory

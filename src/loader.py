@@ -266,3 +266,58 @@ def load_dwi_series(files):
     print(f'[loader] load_dwi_series groups: {list(groups.keys())} '
           f'({sum(len(v) for v in groups.values())} total slices)')
     return groups
+
+
+def is_tracew_series(slices):
+    """Check if a loaded list of slices is a TRACEW (trace-weighted) series.
+
+    Examines DICOM tags of the first slice:
+      - ImageType (0008,0008) containing "TRACEW"
+      - ProtocolName containing "TRACEW"
+      - SeriesDescription containing "TRACEW"
+    """
+    if not slices:
+        return False
+    return _is_tracew(slices[0])
+
+
+def _is_tracew(ds):
+    img_type = ds.get('ImageType', [])
+    if isinstance(img_type, str):
+        img_type = [img_type]
+    if any('TRACEW' in str(t).upper() for t in img_type):
+        return True
+    protocol = str(ds.get('ProtocolName', ''))
+    if 'TRACEW' in protocol.upper():
+        return True
+    desc = str(ds.get('SeriesDescription', ''))
+    if 'TRACEW' in desc.upper():
+        return True
+    return False
+
+
+def get_tracew_b_values(slices):
+    """Extract contributing b-values from a TRACEW series.
+
+    Parses b-value patterns (e.g. 'b0', 'b200', 'b1500') from
+    ProtocolName or SeriesDescription.
+
+    Returns a sorted list of ints, or None if not found.
+    """
+    if not slices:
+        return None
+    ds = slices[0]
+    import re
+    for field in ['ProtocolName', 'SeriesDescription']:
+        text = str(ds.get(field, ''))
+        b_vals = re.findall(r'b(\d+)', text, re.IGNORECASE)
+        if b_vals:
+            return sorted(int(bv) for bv in b_vals)
+    return None
+
+
+def format_tracew_label(b_values):
+    """Format a display label for a TRACEW series."""
+    if b_values:
+        return f"TRACEW ({', '.join(f'b={b}' for b in b_values)})"
+    return 'TRACEW'
