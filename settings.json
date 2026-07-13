@@ -7,6 +7,6 @@
         "R_Cortex": 2,
         "R_Medulla": 3
     },
-    "cortex_diameter": 10.0,
-    "medulla_diameter": 10.0
+    "cortex_diameter": 5.0,
+    "medulla_diameter": 7.1
 }

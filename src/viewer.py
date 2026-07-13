@@ -1480,18 +1480,18 @@ class DicomViewer(QMainWindow):
                 row = QHBoxLayout()
                 row.setSpacing(4)
                 chunk = all_labels[chunk_start:chunk_start + 5]
-                if prefix == 'R':
+                if prefix == 'L':
                     row.addStretch()
                 for lbl in chunk:
                     row.addWidget(make_button(lbl))
-                if prefix == 'L':
+                if prefix == 'R':
                     row.addStretch()
                 layout.addLayout(row)
 
             layout.addStretch()
 
-        build_side(self._left_container, 'L')
-        build_side(self._right_container, 'R')
+        build_side(self._left_container, 'R')
+        build_side(self._right_container, 'L')
 
     def _rebuild_roi_buttons(self):
         self._reset_all_rois()
