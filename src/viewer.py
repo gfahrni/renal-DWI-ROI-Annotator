@@ -45,6 +45,7 @@ def _load_settings():
         'roi_counts': {'L_Cortex': 2, 'L_Medulla': 3, 'R_Cortex': 2, 'R_Medulla': 3},
         'cortex_diameter': 10.0,
         'medulla_diameter': 10.0,
+        'last_b_value': None,
     }
     path = os.path.abspath(SETTINGS_PATH)
     if os.path.exists(path):
@@ -420,6 +421,14 @@ class DicomViewer(QMainWindow):
         self._roi_order_from_counts()
 
         self._load_current_series()
+
+        # Restore last used b-value from settings
+        saved_b = SETTINGS.get('last_b_value')
+        if saved_b is not None and self._b_values and saved_b in self._b_values:
+            self._current_b_value = saved_b
+            self._slices = self._b_value_map[saved_b]
+            self._raw_images = self._raw_images_map[saved_b]
+            self._images = self._images_map[saved_b]
 
         # --- Build UI --------------------------------------------------------
         self._init_ui()
@@ -1374,8 +1383,7 @@ class DicomViewer(QMainWindow):
 
         self.bvalue_btn = QToolButton()
         if self._b_values:
-            self.bvalue_btn.setText(
-                f'b={self._b_values[0]}' if self._b_values else 'b-value N/A')
+            self.bvalue_btn.setText(f'b={self._current_b_value}')
         elif self._series_is_tracew:
             self.bvalue_btn.setText(
                 format_tracew_label(self._tracew_b_values))
@@ -1610,6 +1618,7 @@ class DicomViewer(QMainWindow):
         if bv == self._current_b_value:
             return
         self._current_b_value = bv
+        _save_settings({'last_b_value': bv})
         self.bvalue_btn.setText(f'b={bv}')
         self._slices = self._b_value_map[bv]
         self._raw_images = self._raw_images_map[bv]
@@ -1680,6 +1689,7 @@ class DicomViewer(QMainWindow):
         self._save_windowing()
         prev_center = self._window_center
         prev_width = self._window_width
+        preferred_b = self._current_b_value
         self.current_series_idx = idx
         self._load_current_series()
         # If the new case has no saved W/L file, carry over the W/L
@@ -1693,10 +1703,11 @@ class DicomViewer(QMainWindow):
         # Update b-value button
         self._rebuild_bvalue_menu()
         if self._b_values:
-            self._current_b_value = self._b_values[0]
+            self._current_b_value = preferred_b if preferred_b in self._b_values else self._b_values[0]
             self.bvalue_btn.setText(f'b={self._current_b_value}')
             self._slices = self._b_value_map[self._current_b_value]
             self._images = self._images_map[self._current_b_value]
+            self._raw_images = self._raw_images_map[self._current_b_value]
         elif self._series_is_tracew:
             self.bvalue_btn.setText(
                 format_tracew_label(self._tracew_b_values))
